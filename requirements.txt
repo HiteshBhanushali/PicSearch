@@ -1,0 +1,12 @@
+flask
+flask-cors
+Pillow
+torch
+torchvision
+transformers
+sentence-transformers
+numpy
+requests
+python-dotenv
+gunicorn
+werkzeug
