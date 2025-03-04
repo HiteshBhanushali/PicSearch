@@ -1,83 +1,88 @@
 import os
-import json
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
-from config import Config
-from utils.image_analyzer import ImageAnalyzer
+import json
+from utils.image_analyzer import analyze_image
+from utils.embeddings import generate_embeddings
+import models.git_model as git_model
 
-# Initialize app
 app = Flask(__name__)
-app.config.from_object(Config)
-Config.init_app()
 CORS(app)
 
-# Initialize image analyzer
-image_analyzer = ImageAnalyzer()
+# Configure environment variables
+PORT = int(os.environ.get("PORT", 10000))
+UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static/uploads")
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-def allowed_file(filename):
-    """Check if the file has an allowed extension"""
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+@app.route('/')
+def index():
+    return jsonify({"status": "API is running"})
 
 @app.route('/api/upload', methods=['POST'])
-def upload_images():
-    """Upload and analyze images"""
-    if 'images' not in request.files:
-        return jsonify({"error": "No images provided"}), 400
+def upload_file():
+    if 'image' not in request.files:
+        return jsonify({"error": "No file part"}), 400
     
-    # Get the list of image files
-    image_files = request.files.getlist('images')
+    file = request.files['image']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
     
-    # Validate files
-    valid_images = []
-    for image_file in image_files:
-        if image_file and allowed_file(image_file.filename):
-            valid_images.append(image_file)
-    
-    if not valid_images:
-        return jsonify({"error": "No valid images provided"}), 400
-    
-    # Process images
-    results = image_analyzer.process_images(valid_images)
-    
-    return jsonify({"results": results})
+    if file:
+        filename = secure_filename(file.filename)
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+        
+        # Analyze image
+        analysis = analyze_image(filepath)
+        
+        # Generate embeddings
+        embedding = generate_embeddings(analysis["description"])
+        
+        # Save to data file
+        data_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data/image_descriptions.json")
+        try:
+            with open(data_file, 'r') as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            data = []
+        
+        data.append({
+            "filename": filename,
+            "description": analysis["description"],
+            "embedding": embedding,
+            "tags": analysis["tags"]
+        })
+        
+        with open(data_file, 'w') as f:
+            json.dump(data, f)
+        
+        return jsonify({
+            "filename": filename,
+            "description": analysis["description"],
+            "tags": analysis["tags"]
+        })
 
-@app.route('/api/search', methods=['GET'])
+@app.route('/api/search', methods=['POST'])
 def search_images():
-    """Search for images based on query text"""
-    query = request.args.get('query', '')
-    limit = int(request.args.get('limit', 10))
+    data = request.json
+    query = data.get('query', '')
     
     if not query:
-        return jsonify({"error": "No query provided"}), 400
+        return jsonify({"error": "Query is required"}), 400
     
-    # Search for images
-    results = image_analyzer.search_images(query, limit=limit)
+    # Generate embedding for the query
+    query_embedding = generate_embeddings(query)
+    
+    # Use model to find similar images
+    results = git_model.find_similar_images(query_embedding)
     
     return jsonify({"results": results})
 
-@app.route('/api/all_images', methods=['GET'])
-def get_all_images():
-    """Get all images and their descriptions"""
-    try:
-        # Load data from JSON file
-        with open(Config.JSON_DATA_FILE, 'r') as f:
-            data = json.load(f)
-        
-        # Remove embedding data to reduce payload size
-        for item in data:
-            if 'embedding' in item:
-                del item['embedding']
-        
-        return jsonify({"images": data})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/static/<path:path>')
-def serve_static(path):
-    """Serve static files"""
-    return send_from_directory('static', path)
+@app.route('/api/images/<filename>')
+def get_image(filename):
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=PORT)

@@ -1,54 +1,51 @@
-import axios from 'axios';
+// src/services/api.js
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+const API_URL = process.env.REACT_APP_API_URL || 'https://image-analyzer-backend.onrender.com';
 
-const apiService = {
-  // Upload images
-  uploadImages: async (imageFiles) => {
-    const formData = new FormData();
-    
-    imageFiles.forEach(file => {
-      formData.append('images', file);
+export const uploadImage = async (file) => {
+  const formData = new FormData();
+  formData.append('image', file);
+
+  try {
+    const response = await fetch(`${API_URL}/api/upload`, {
+      method: 'POST',
+      body: formData,
     });
-    
-    try {
-      const response = await axios.post(`${API_URL}/upload`, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        }
-      });
-      
-      return response.data;
-    } catch (error) {
-      console.error('Error uploading images:', error);
-      throw error;
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to upload image');
     }
-  },
-  
-  // Search images
-  searchImages: async (query) => {
-    try {
-      const response = await axios.get(`${API_URL}/search`, {
-        params: { query }
-      });
-      
-      return response.data;
-    } catch (error) {
-      console.error('Error searching images:', error);
-      throw error;
-    }
-  },
-  
-  // Get all images
-  getAllImages: async () => {
-    try {
-      const response = await axios.get(`${API_URL}/all_images`);
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching all images:', error);
-      throw error;
-    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Upload error:', error);
+    throw error;
   }
 };
 
-export default apiService;
+export const searchImages = async (query) => {
+  try {
+    const response = await fetch(`${API_URL}/api/search`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ query }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Search failed');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Search error:', error);
+    throw error;
+  }
+};
+
+export const getImageUrl = (filename) => {
+  return `${API_URL}/api/images/${filename}`;
+};
